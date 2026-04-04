@@ -16,10 +16,15 @@ add_subdirectory(extern)
 
 add_executable(cuda_sph
     src/main.cpp
-    src/sph_compute.cu
+    src/SPH.cu
 
-    src/particle.h
-    src/sph_compute.cuh
+    src/SPH.h
+    src/SPHParams.h
+    src/FluidMaths.cuh
+
+    src/2D/SPHCompute2D.cuh
+    src/2D/SPHCompute2D.cu
+    src/2D/SpatialHash2D.cuh
 )
 
 # CUDA-specific compile options

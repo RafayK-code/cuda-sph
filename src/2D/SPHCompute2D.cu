@@ -1,7 +1,7 @@
 #include "SPHCompute2D.cuh"
 #include "SpatialHash2D.cuh"
 #include "../FluidMaths.cuh"
-#include "../SPHParams.h"
+#include "../Constants.h"
 
 #include <cmath>
 
@@ -22,12 +22,19 @@ namespace sph::dim2
         cudaMemcpyToSymbol(d_SpikyPow2DerivativeScalingFactor, &dspiky2, sizeof(float));
     }
 
+    __constant__ DevicePhysicsConfig d_config;
+
+    void UploadPhysicsConfig(const DevicePhysicsConfig& config)
+    {
+        cudaMemcpyToSymbol(d_config, &config, sizeof(DevicePhysicsConfig));
+    }
+
     __global__ void ExternalForcesKernel(Particle* particles, int count, float dt)
     {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= count) return;
 
-        particles[i].velocity.y += GRAVITY * dt;
+        particles[i].velocity.y += d_config.gravity * dt;
 
         const float predFactor = 1.0f / 120.0f;
         particles[i].predictedPosition.x = particles[i].position.x + particles[i].velocity.x * predFactor;
@@ -45,8 +52,8 @@ namespace sph::dim2
         if (i >= count) return;
 
         float2 pos = make_float2(particles[i].predictedPosition.x, particles[i].predictedPosition.y);
-        int2 cell = GetCell2D(pos, SMOOTHING_RADIUS);
-        uint32_t  hash = HashCell2D(cell);
+        int2 cell = GetCell(pos, d_config.smoothingRadius);
+        uint32_t  hash = HashCell(cell);
         uint32_t  key = KeyFromHash(hash, (uint32_t)count);
 
         spatialKeys[i] = key;
@@ -74,15 +81,15 @@ namespace sph::dim2
         if (i >= count) return;
 
         float2 pos = make_float2(particles[i].predictedPosition.x, particles[i].predictedPosition.y);
-        int2 originCell = GetCell2D(pos, SMOOTHING_RADIUS);
-        float sqrRadius = SMOOTHING_RADIUS * SMOOTHING_RADIUS;
+        int2 originCell = GetCell(pos, d_config.smoothingRadius);
+        float sqrRadius = d_config.smoothingRadius * d_config.smoothingRadius;
         float density = 0.0f;
         float nearDensity = 0.0f;
 
         for (int n = 0; n < 9; n++)
         {
             int2 cell = make_int2(originCell.x + d_offsets2D[n].x, originCell.y + d_offsets2D[n].y);
-            uint32_t hash = HashCell2D(cell);
+            uint32_t hash = HashCell(cell);
             uint32_t key = KeyFromHash(hash, (uint32_t)count);
 
             uint32_t currIndex = spatialOffsets[key];
@@ -101,8 +108,8 @@ namespace sph::dim2
                 if (sqrDst > sqrRadius) continue;
 
                 float dst = sqrtf(sqrDst);
-                density += SpikyKernelPow2(dst, SMOOTHING_RADIUS);
-                nearDensity += SpikyKernelPow3(dst, SMOOTHING_RADIUS);
+                density += SpikyKernelPow2(dst, d_config.smoothingRadius);
+                nearDensity += SpikyKernelPow3(dst, d_config.smoothingRadius);
             }
         }
 
@@ -122,18 +129,18 @@ namespace sph::dim2
 
         float density = particles[i].density;
         float nearDensity = particles[i].nearDensity;
-        float pressure = (density - TARGET_DENSITY) * PRESSURE_MULT;
-        float nearPressure = nearDensity * NEAR_PRESSURE_MULT;
+        float pressure = (density - d_config.targetDensity) * d_config.pressureMultiplier;
+        float nearPressure = nearDensity * d_config.nearPressureMultiplier;
 
         float2 pos = make_float2(particles[i].predictedPosition.x, particles[i].predictedPosition.y);
-        int2 originCell = GetCell2D(pos, SMOOTHING_RADIUS);
-        float sqrRadius = SMOOTHING_RADIUS * SMOOTHING_RADIUS;
+        int2 originCell = GetCell(pos, d_config.smoothingRadius);
+        float sqrRadius = d_config.smoothingRadius * d_config.smoothingRadius;
         float2 pressureForce = make_float2(0.0f, 0.0f);
 
         for (int n = 0; n < 9; n++)
         {
             int2 cell = make_int2(originCell.x + d_offsets2D[n].x, originCell.y + d_offsets2D[n].y);
-            uint32_t hash = HashCell2D(cell);
+            uint32_t hash = HashCell(cell);
             uint32_t key = KeyFromHash(hash, (uint32_t)count);
 
             uint32_t currIndex = spatialOffsets[key];
@@ -158,16 +165,16 @@ namespace sph::dim2
 
                 float nDensity = particles[neighbourIndex].density;
                 float nNearDensity = particles[neighbourIndex].nearDensity;
-                float nPressure = (nDensity - TARGET_DENSITY) * PRESSURE_MULT;
-                float nNearPressure = nNearDensity * NEAR_PRESSURE_MULT;
+                float nPressure = (nDensity - d_config.targetDensity) * d_config.pressureMultiplier;
+                float nNearPressure = nNearDensity * d_config.nearPressureMultiplier;
 
                 float sharedP = (pressure + nPressure) * 0.5f;
                 float sharedNP = (nearPressure + nNearPressure) * 0.5f;
 
-                pressureForce.x += dir.x * DerivativeSpikyPow2(dst, SMOOTHING_RADIUS) * sharedP / fmaxf(nDensity, 0.001f);
-                pressureForce.y += dir.y * DerivativeSpikyPow2(dst, SMOOTHING_RADIUS) * sharedP / fmaxf(nDensity, 0.001f);
-                pressureForce.x += dir.x * DerivativeSpikyPow3(dst, SMOOTHING_RADIUS) * sharedNP / fmaxf(nNearDensity, 0.001f);
-                pressureForce.y += dir.y * DerivativeSpikyPow3(dst, SMOOTHING_RADIUS) * sharedNP / fmaxf(nNearDensity, 0.001f);
+                pressureForce.x += dir.x * DerivativeSpikyPow2(dst, d_config.smoothingRadius) * sharedP / fmaxf(nDensity, 0.001f);
+                pressureForce.y += dir.y * DerivativeSpikyPow2(dst, d_config.smoothingRadius) * sharedP / fmaxf(nDensity, 0.001f);
+                pressureForce.x += dir.x * DerivativeSpikyPow3(dst, d_config.smoothingRadius) * sharedNP / fmaxf(nNearDensity, 0.001f);
+                pressureForce.y += dir.y * DerivativeSpikyPow3(dst, d_config.smoothingRadius) * sharedNP / fmaxf(nNearDensity, 0.001f);
             }
         }
 
@@ -188,14 +195,14 @@ namespace sph::dim2
 
         float2 pos = make_float2(particles[i].predictedPosition.x, particles[i].predictedPosition.y);
         float2 vel = make_float2(particles[i].velocity.x, particles[i].velocity.y);
-        int2 originCell = GetCell2D(pos, SMOOTHING_RADIUS);
-        float sqrRadius = SMOOTHING_RADIUS * SMOOTHING_RADIUS;
+        int2 originCell = GetCell(pos, d_config.smoothingRadius);
+        float sqrRadius = d_config.smoothingRadius * d_config.smoothingRadius;
         float2 viscosityForce = make_float2(0.0f, 0.0f);
 
         for (int n = 0; n < 9; n++)
         {
             int2 cell = make_int2(originCell.x + d_offsets2D[n].x, originCell.y + d_offsets2D[n].y);
-            uint32_t hash = HashCell2D(cell);
+            uint32_t hash = HashCell(cell);
             uint32_t key = KeyFromHash(hash, (uint32_t)count);
 
             uint32_t currIndex = spatialOffsets[key];
@@ -217,13 +224,13 @@ namespace sph::dim2
 
                 float dst = sqrtf(sqrDst);
                 float2 nVel = make_float2(particles[neighbourIndex].velocity.x, particles[neighbourIndex].velocity.y);
-                viscosityForce.x += (nVel.x - vel.x) * SmoothingKernelPoly6(dst, SMOOTHING_RADIUS);
-                viscosityForce.y += (nVel.y - vel.y) * SmoothingKernelPoly6(dst, SMOOTHING_RADIUS);
+                viscosityForce.x += (nVel.x - vel.x) * SmoothingKernelPoly6(dst, d_config.smoothingRadius);
+                viscosityForce.y += (nVel.y - vel.y) * SmoothingKernelPoly6(dst, d_config.smoothingRadius);
             }
         }
 
-        particles[i].velocity.x += viscosityForce.x * VISCOSITY * dt;
-        particles[i].velocity.y += viscosityForce.y * VISCOSITY * dt;
+        particles[i].velocity.x += viscosityForce.x * d_config.viscosity * dt;
+        particles[i].velocity.y += viscosityForce.y * d_config.viscosity * dt;
     }
 
     __global__ void UpdatePositionsKernel(Particle* particles, int count, float dt)
@@ -234,13 +241,13 @@ namespace sph::dim2
         particles[i].position.x += particles[i].velocity.x * dt;
         particles[i].position.y += particles[i].velocity.y * dt;
 
-        float halfX = BOUNDS_X * 0.5f;
-        float halfY = BOUNDS_Y * 0.5f;
+        float halfX = d_config.boundsX * 0.5f;
+        float halfY = d_config.boundsY * 0.5f;
 
-        if (particles[i].position.x < -halfX) { particles[i].position.x = -halfX; particles[i].velocity.x *= -COLLISION_DAMPING; }
-        if (particles[i].position.x > halfX) { particles[i].position.x = halfX; particles[i].velocity.x *= -COLLISION_DAMPING; }
-        if (particles[i].position.y < -halfY) { particles[i].position.y = -halfY; particles[i].velocity.y *= -COLLISION_DAMPING; }
-        if (particles[i].position.y > halfY) { particles[i].position.y = halfY; particles[i].velocity.y *= -COLLISION_DAMPING; }
+        if (particles[i].position.x < -halfX) { particles[i].position.x = -halfX; particles[i].velocity.x *= -d_config.collisionDamping; }
+        if (particles[i].position.x > halfX) { particles[i].position.x = halfX; particles[i].velocity.x *= -d_config.collisionDamping; }
+        if (particles[i].position.y < -halfY) { particles[i].position.y = -halfY; particles[i].velocity.y *= -d_config.collisionDamping; }
+        if (particles[i].position.y > halfY) { particles[i].position.y = halfY; particles[i].velocity.y *= -d_config.collisionDamping; }
     }
 
     __global__ void CopyToVBOKernel(Particle* particles, float2* vbo, int count)
@@ -248,7 +255,7 @@ namespace sph::dim2
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= count) return;
 
-        vbo[i].x = particles[i].position.x / (BOUNDS_X * 0.5f);
-        vbo[i].y = particles[i].position.y / (BOUNDS_Y * 0.5f);
+        vbo[i].x = particles[i].position.x / (d_config.boundsX * 0.5f);
+        vbo[i].y = particles[i].position.y / (d_config.boundsY * 0.5f);
     }
 }

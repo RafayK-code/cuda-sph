@@ -3,6 +3,7 @@
 #include <iostream>
 #include <algorithm>
 #include "SPH.h"
+#include "2D/SPH2D.h"
 
 const char* vertexShaderSource = R"(
 #version 450 core
@@ -40,6 +41,8 @@ static void compileShader(unsigned int shader, const char* name)
         std::cerr << name << " shader error: " << log << std::endl;
     }
 }
+
+static constexpr int MAX_PARTICLES = 10000;
 
 int main()
 {
@@ -116,8 +119,11 @@ int main()
     glEnableVertexAttribArray(0);
 
     // Init SPH
-    sph::Init(2000);
-    sph::RegisterGLBuffer(vbo);
+    sph::ISimulation* sim = new sph::dim2::Simulation(2000, MAX_PARTICLES);
+    sim->RegisterGLBuffer(vbo);
+
+    //sph::Init(2000);
+    //sph::RegisterGLBuffer(vbo);
 
     float lastTime = (float)glfwGetTime();
     float spawnCooldown = 0.0f;
@@ -140,11 +146,15 @@ int main()
             float wx = ((float)mx / WIDTH * 2.0f - 1.0f) * (17.0f * 0.5f);
             float wy = (1.0f - (float)my / HEIGHT * 2.0f) * (9.0f * 0.5f);
 
-            sph::SpawnParticles(50, wx, wy);
+            auto sim2d = dynamic_cast<sph::dim2::Simulation*>(sim);
+            if (sim2d)
+                sim2d->SpawnParticles(50, wx, wy);
+
             spawnCooldown = 0.1f;
         }
 
-        sph::Update(dt);
+        //sph::Update(dt);
+        sim->Update(dt);
 
         glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -152,13 +162,13 @@ int main()
         glUseProgram(program);
         glUniform1f(glGetUniformLocation(program, "pointSize"), 6.0f);
         glBindVertexArray(vao);
-        glDrawArrays(GL_POINTS, 0, sph::ParticleCount());
+        glDrawArrays(GL_POINTS, 0, sim->ParticleCount());
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
-    sph::Cleanup();
+    delete sim;
     glDeleteVertexArrays(1, &vao);
     glDeleteBuffers(1, &vbo);
     glDeleteProgram(program);

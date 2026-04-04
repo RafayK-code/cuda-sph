@@ -17,7 +17,21 @@ namespace sph::dim2
         float mass;
     };
 
+    struct DevicePhysicsConfig
+    {
+        float gravity = -9.8f;
+        float collisionDamping = 0.95f;
+        float smoothingRadius = 0.35f;
+        float targetDensity = 55.0f;
+        float pressureMultiplier = 500.0f;
+        float nearPressureMultiplier = 5.0f;
+        float viscosity = 0.03f;
+        float boundsX = 17.0f;
+        float boundsY = 9.0f;
+    };
+
     void UploadScalingFactors(float radius);
+    void UploadPhysicsConfig(const DevicePhysicsConfig& config);
 
     __global__ void ExternalForcesKernel(Particle* particles, int count, float dt);
 

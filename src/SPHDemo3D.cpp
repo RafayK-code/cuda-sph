@@ -157,7 +157,7 @@ SPHDemo3D::SPHDemo3D(GLFWwindow* window)
     sph::dim3::Spawner spawner;
     spawner.AddRegion(make_float3(6.f, 0.f, 0.f), 3.f);
     spawner.AddRegion(make_float3(-6.0f, 0.0f, 0.0f), 3.0f);
-    auto spawnData = spawner.GetSpawnData(2000);
+    auto spawnData = spawner.GetSpawnData(1500);
 
     m_sim = new sph::dim3::Simulation(spawnData, MAX_PARTICLES);
     m_sim->RegisterGLBuffer(m_vbo);

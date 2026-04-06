@@ -26,9 +26,22 @@ namespace sph::dim3
         float pressureMultiplier = 500.0f;
         float nearPressureMultiplier = 5.0f;
         float viscosity = 0.03f;
-        float boundsX = 17.0f;
-        float boundsY = 9.0f;
-        float boundsZ = 9.0f;
+
+        bool operator==(const DevicePhysicsConfig& other) const
+        {
+            return gravity == other.gravity &&
+                collisionDamping == other.collisionDamping &&
+                smoothingRadius == other.smoothingRadius &&
+                targetDensity == other.targetDensity &&
+                pressureMultiplier == other.pressureMultiplier &&
+                nearPressureMultiplier == other.nearPressureMultiplier &&
+                viscosity == other.viscosity;
+        }
+
+        bool operator!=(const DevicePhysicsConfig& other) const
+        {
+            return !(*this == other);
+        }
     };
 
     void UploadScalingFactors(float radius);
@@ -70,7 +83,7 @@ namespace sph::dim3
         int count, float dt
     );
 
-    __global__ void UpdatePositionsKernel(Particle* particles, int count, float dt);
+    __global__ void UpdatePositionsKernel(Particle* particles, float3 bounds, int count, float dt);
 
     struct VBOParticle
     {

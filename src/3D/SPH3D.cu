@@ -12,9 +12,12 @@
 #include <vector>
 #include <cmath>
 
+#undef min
+
 namespace sph::dim3
 {
     static DevicePhysicsConfig g_devicePhysicsConfig;
+    static bool g_devicePhysicsConfigDirty = false;
 
     static DevicePhysicsConfig CreateDevicePhysicsConfig(const Config& config)
     {
@@ -26,9 +29,6 @@ namespace sph::dim3
         dconf.pressureMultiplier = config.pressureMultiplier;
         dconf.nearPressureMultiplier = config.nearPressureMultiplier;
         dconf.viscosity = config.viscosity;
-        dconf.boundsX = config.boundsX;
-        dconf.boundsY = config.boundsY;
-        dconf.boundsZ = config.boundsZ;
 
         return dconf;
     }
@@ -109,6 +109,13 @@ namespace sph::dim3
 
     void Simulation::Update(float dt)
     {
+        if (g_devicePhysicsConfigDirty)
+        {
+            UploadScalingFactors(m_config.smoothingRadius);
+            UploadPhysicsConfig(g_devicePhysicsConfig);
+            g_devicePhysicsConfigDirty = false;
+        }
+
         int threads = 256;
         int blocks = (m_particleCount + threads - 1) / threads;
 
@@ -143,7 +150,8 @@ namespace sph::dim3
                 m_data->d_particles, m_data->d_spatialKeys, m_data->d_spatialOffsets, m_data->d_sortedIndices, m_particleCount, stepDt);
             cudaDeviceSynchronize();
 
-            UpdatePositionsKernel<<<blocks, threads>>>(m_data->d_particles, m_particleCount, stepDt);
+            UpdatePositionsKernel<<<blocks, threads>>>(
+                m_data->d_particles, make_float3(m_config.boundsX, m_config.boundsY, m_config.boundsZ), m_particleCount, stepDt);
             cudaDeviceSynchronize();
         }
 
@@ -154,6 +162,17 @@ namespace sph::dim3
         cudaGraphicsResourceGetMappedPointer((void**)&d_vbo, &size, m_data->d_vboResource);
         CopyToVBOKernel<<<blocks, threads>>>(m_data->d_particles, d_vbo, m_particleCount);
         cudaGraphicsUnmapResources(1, &m_data->d_vboResource);
+    }
+
+    void Simulation::UpdateConfig(const Config& config)
+    {
+        m_config = config;
+        DevicePhysicsConfig newConfig = CreateDevicePhysicsConfig(config);
+        if (g_devicePhysicsConfig != newConfig)
+        {
+            g_devicePhysicsConfig = newConfig;
+            g_devicePhysicsConfigDirty = true;
+        }
     }
 
     void Simulation::RegisterGLBuffer(GLuint buffer)

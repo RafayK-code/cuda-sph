@@ -14,6 +14,7 @@ public:
 
 private:
     void InitBox();
+    void UpdateBox();
     void DrawBox(const glm::mat4& view, const glm::mat4& proj);
     void UpdateCamera();
 
@@ -48,6 +49,10 @@ private:
     double m_lastMouseY = 0.0;
     bool m_mousePressed = false;
     bool m_firstMouse = true;
+
+    float m_simBoundsX;
+    float m_simBoundsY;
+    float m_simBoundsZ;
 
     static constexpr int MAX_PARTICLES = 100000;
 };

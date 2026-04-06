@@ -7,6 +7,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <imgui.h>
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+
 // ---- Shaders ----------------------------------------------------------------
 
 static const char* vsParticles = R"(
@@ -162,7 +166,20 @@ SPHDemo3D::SPHDemo3D(GLFWwindow* window)
     m_sim = new sph::dim3::Simulation(spawnData, MAX_PARTICLES);
     m_sim->RegisterGLBuffer(m_vbo);
 
+    m_simBoundsX = m_sim->GetConfig().boundsX;
+    m_simBoundsY = m_sim->GetConfig().boundsY;
+    m_simBoundsZ = m_sim->GetConfig().boundsZ;
+
     InitBox();
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGui::StyleColorsDark();
+
+    // Setup Platform/Renderer backends
+    ImGui_ImplGlfw_InitForOpenGL(window, false);
+    ImGui_ImplOpenGL3_Init("#version 450");
 
     glfwSetWindowUserPointer(m_window, this);
     glfwSetMouseButtonCallback(m_window, MouseButtonCallback);
@@ -185,9 +202,50 @@ SPHDemo3D::~SPHDemo3D()
 void SPHDemo3D::Run()
 {
     float lastTime = (float)glfwGetTime();
+    bool configDirty = false;
 
     while (!glfwWindowShouldClose(m_window))
     {
+        glfwPollEvents();
+
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);  // Position it
+        ImGui::SetNextWindowSize(ImVec2(400, 160), ImGuiCond_FirstUseEver);  // Make it bigger
+
+        ImGui::Begin("Marching Cubes Controls");
+        if (ImGui::SliderFloat("Bounds X", &m_simBoundsX, 2.0f, 20.0f))
+        {
+            configDirty = true;
+        }
+        if (ImGui::SliderFloat("Bounds Y", &m_simBoundsY, 2.0f, 20.0f))
+        {
+            configDirty = true;
+        }
+        if (ImGui::SliderFloat("Bounds Z", &m_simBoundsZ, 2.0f, 20.0f))
+        {
+            configDirty = true;
+        }
+
+        if (configDirty)
+        {
+            sph::Config newConf = m_sim->GetConfig();
+            newConf.boundsX = m_simBoundsX;
+            newConf.boundsY = m_simBoundsY;
+            newConf.boundsZ = m_simBoundsZ;
+            m_sim->UpdateConfig(newConf);
+
+            UpdateBox();
+
+            configDirty = false;
+        }
+
+        ImGui::Text("Particles: %d", m_sim->ParticleCount());
+        ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+        ImGui::End();
+
         float now = (float)glfwGetTime();
         float dt  = std::min(now - lastTime, 1.0f / 30.0f);
         lastTime  = now;
@@ -223,17 +281,47 @@ void SPHDemo3D::Run()
         // Draw bounding box
         DrawBox(view, projection);
 
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
         glfwSwapBuffers(m_window);
-        glfwPollEvents();
     }
 }
 
 void SPHDemo3D::InitBox()
 {
-    const sph::Config& cfg = m_sim->GetConfig();
-    float hx = cfg.boundsX * 0.5f;
-    float hy = cfg.boundsY * 0.5f;
-    float hz = cfg.boundsZ * 0.5f;
+    // Create VAO/VBO/EBO with placeholder data
+    glGenVertexArrays(1, &m_boxVao);
+    glGenBuffers(1, &m_boxVbo);
+    glGenBuffers(1, &m_boxEbo);
+
+    glBindVertexArray(m_boxVao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_boxVbo);
+    glBufferData(GL_ARRAY_BUFFER, 8 * 3 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    unsigned int indices[24] = {
+        0,1, 1,2, 2,3, 3,0,   // front face
+        4,5, 5,6, 6,7, 7,4,   // back face
+        0,4, 1,5, 2,6, 3,7    // connecting edges
+    };
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_boxEbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    glBindVertexArray(0);
+
+    // Now fill with actual geometry
+    UpdateBox();
+}
+
+void SPHDemo3D::UpdateBox()
+{
+    float hx = m_simBoundsX * 0.5f;
+    float hy = m_simBoundsY * 0.5f;
+    float hz = m_simBoundsZ * 0.5f;
 
     // 8 corners of the bounding box
     float verts[8 * 3] = {
@@ -247,28 +335,9 @@ void SPHDemo3D::InitBox()
         -hx,  hy,  hz,   // 7
     };
 
-    // 12 edges as line pairs
-    unsigned int indices[24] = {
-        0,1, 1,2, 2,3, 3,0,   // front face
-        4,5, 5,6, 6,7, 7,4,   // back face
-        0,4, 1,5, 2,6, 3,7    // connecting edges
-    };
-
-    glGenVertexArrays(1, &m_boxVao);
-    glGenBuffers(1, &m_boxVbo);
-    glGenBuffers(1, &m_boxEbo);
-
-    glBindVertexArray(m_boxVao);
-
     glBindBuffer(GL_ARRAY_BUFFER, m_boxVbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_boxEbo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-    glBindVertexArray(0);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 void SPHDemo3D::DrawBox(const glm::mat4& view, const glm::mat4& proj)
@@ -293,6 +362,11 @@ void SPHDemo3D::UpdateCamera()
 
 void SPHDemo3D::MouseButtonCallback(GLFWwindow* w, int button, int action, int mods)
 {
+    ImGui_ImplGlfw_MouseButtonCallback(w, button, action, mods);
+
+    if (ImGui::GetIO().WantCaptureMouse)
+        return;
+
     auto* demo = static_cast<SPHDemo3D*>(glfwGetWindowUserPointer(w));
     if (button == GLFW_MOUSE_BUTTON_LEFT)
     {
@@ -307,6 +381,11 @@ void SPHDemo3D::MouseButtonCallback(GLFWwindow* w, int button, int action, int m
 
 void SPHDemo3D::CursorPosCallback(GLFWwindow* w, double xpos, double ypos)
 {
+    ImGui_ImplGlfw_CursorPosCallback(w, xpos, ypos);
+
+    if (ImGui::GetIO().WantCaptureMouse)
+        return;
+
     auto* demo = static_cast<SPHDemo3D*>(glfwGetWindowUserPointer(w));
     if (!demo->m_mousePressed) return;
 
@@ -331,6 +410,11 @@ void SPHDemo3D::CursorPosCallback(GLFWwindow* w, double xpos, double ypos)
 
 void SPHDemo3D::ScrollCallback(GLFWwindow* w, double xoffset, double yoffset)
 {
+    ImGui_ImplGlfw_ScrollCallback(w, xoffset, yoffset);
+
+    if (ImGui::GetIO().WantCaptureMouse)
+        return;
+
     auto* demo = static_cast<SPHDemo3D*>(glfwGetWindowUserPointer(w));
     demo->m_cameraDistance -= (float)yoffset * 1.5f;
     demo->m_cameraDistance  = std::clamp(demo->m_cameraDistance, 2.0f, 150.0f);

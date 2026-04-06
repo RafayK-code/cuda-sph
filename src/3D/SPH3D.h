@@ -13,7 +13,7 @@ namespace sph::dim3
 
         void Update(float dt) override;
 
-        void UpdateConfig(const Config& config) override {}
+        void UpdateConfig(const Config& config) override;
 
         int ParticleCount() const override { return m_particleCount; }
         const Config& GetConfig() const override { return m_config; }

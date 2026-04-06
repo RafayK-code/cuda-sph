@@ -251,7 +251,7 @@ namespace sph::dim3
         particles[i].velocity.z += viscosityForce.z * d_config.viscosity * dt;
     }
 
-    __global__ void UpdatePositionsKernel(Particle* particles, int count, float dt)
+    __global__ void UpdatePositionsKernel(Particle* particles, float3 bounds, int count, float dt)
     {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= count) return;
@@ -260,9 +260,9 @@ namespace sph::dim3
         particles[i].position.y += particles[i].velocity.y * dt;
         particles[i].position.z += particles[i].velocity.z * dt;
 
-        float halfX = d_config.boundsX * 0.5f;
-        float halfY = d_config.boundsY * 0.5f;
-        float halfZ = d_config.boundsZ * 0.5f;
+        float halfX = bounds.x * 0.5f;
+        float halfY = bounds.y * 0.5f;
+        float halfZ = bounds.z * 0.5f;
 
         if (particles[i].position.x < -halfX) { particles[i].position.x = -halfX; particles[i].velocity.x *= -d_config.collisionDamping; }
         if (particles[i].position.x >  halfX) { particles[i].position.x =  halfX; particles[i].velocity.x *= -d_config.collisionDamping; }

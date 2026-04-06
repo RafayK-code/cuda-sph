@@ -1,8 +1,8 @@
-#include "SPH2D.h"
+#include "SPH3D.h"
 
 #include "../FluidMaths.cuh"
-#include "SpatialHash2D.cuh"
-#include "SPHCompute2D.cuh"
+#include "SpatialHash3D.cuh"
+#include "SPHCompute3D.cuh"
 
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
@@ -12,7 +12,7 @@
 #include <vector>
 #include <cmath>
 
-namespace sph::dim2
+namespace sph::dim3
 {
     static DevicePhysicsConfig g_devicePhysicsConfig;
 
@@ -28,6 +28,7 @@ namespace sph::dim2
         dconf.viscosity = config.viscosity;
         dconf.boundsX = config.boundsX;
         dconf.boundsY = config.boundsY;
+        dconf.boundsZ = config.boundsZ;
 
         return dconf;
     }
@@ -61,7 +62,7 @@ namespace sph::dim2
     };
 
     Simulation::Simulation(int initialParticles, int maxParticles)
-        : m_config(Config::Create(Dimension::Dim2))
+        : m_config(Config::Create(Dimension::Dim3))
         , m_maxParticles(maxParticles)
         , m_particleCount(initialParticles)
     {
@@ -75,7 +76,7 @@ namespace sph::dim2
     }
 
     Simulation::Simulation(const SpawnData& spawnData, int maxParticles)
-        : m_config(Config::Create(Dimension::Dim2))
+        : m_config(Config::Create(Dimension::Dim3))
         , m_maxParticles(maxParticles)
         , m_particleCount(std::min((int)spawnData.positions.size(), maxParticles))
     {
@@ -85,13 +86,13 @@ namespace sph::dim2
 
         m_data = new DeviceData(m_maxParticles);
 
-        std::vector<Particle> h(m_maxParticles);
+        std::vector<dim3::Particle> h(m_maxParticles);
         for (int i = 0; i < m_particleCount; i++)
         {
             h[i].position          = spawnData.positions[i];
             h[i].predictedPosition = spawnData.positions[i];
             h[i].velocity          = spawnData.velocities[i];
-            h[i].acceleration      = make_float2(0.f, 0.f);
+            h[i].acceleration      = make_float3(0.f, 0.f, 0.f);
             h[i].density           = m_config.targetDensity;
             h[i].nearDensity       = 0.f;
             h[i].pressure          = 0.f;
@@ -115,7 +116,7 @@ namespace sph::dim2
 
         for (int step = 0; step < m_config.substeps; step++)
         {
-            ExternalForcesKernel<<<blocks, threads>>> (m_data->d_particles, m_particleCount, stepDt);
+            ExternalForcesKernel<<<blocks, threads>>>(m_data->d_particles, m_particleCount, stepDt);
             cudaDeviceSynchronize();
 
             ComputeKeysKernel<<<blocks, threads>>>(
@@ -147,7 +148,7 @@ namespace sph::dim2
         }
 
         // copy to VBO
-        float2* d_vbo = nullptr;
+        VBOParticle* d_vbo = nullptr;
         size_t size = 0;
         cudaGraphicsMapResources(1, &m_data->d_vboResource);
         cudaGraphicsResourceGetMappedPointer((void**)&d_vbo, &size, m_data->d_vboResource);
@@ -160,59 +161,37 @@ namespace sph::dim2
         cudaGraphicsGLRegisterBuffer(&m_data->d_vboResource, buffer, cudaGraphicsMapFlagsWriteDiscard);
     }
 
-#undef min
-
-    void Simulation::SpawnParticles(int count, float wx, float wy)
-    {
-        int toSpawn = std::min(count, m_maxParticles - m_particleCount);
-        if (toSpawn <= 0)
-            return;
-
-        std::vector<Particle> h(toSpawn);
-
-        int cols = static_cast<int>(sqrtf(static_cast<float>(toSpawn)));
-
-        for (int i = 0; i < toSpawn; i++)
-        {
-            int x = i % cols;
-            int y = i / cols;
-            h[i].position = make_float2(wx + x * m_config.spawnSpacing, wy + y * m_config.spawnSpacing);
-            h[i].predictedPosition = h[i].position;
-            h[i].velocity = make_float2(0.0f, 0.0f);
-            h[i].acceleration = make_float2(0.0f, 0.0f);
-            h[i].density = m_config.targetDensity;
-            h[i].nearDensity = 0.0f;
-            h[i].pressure = 0.0f;
-            h[i].nearPressure = 0.0f;
-            h[i].mass = 1.0f;
-        }
-
-        cudaMemcpy(m_data->d_particles + m_particleCount, h.data(), toSpawn * sizeof(dim2::Particle), cudaMemcpyHostToDevice);
-        m_particleCount += toSpawn;
-    }
-
     void Simulation::InitSpawnParticles()
     {
-        std::vector<dim2::Particle> h(m_maxParticles);
+        std::vector<dim3::Particle> h(m_maxParticles);
 
-        int cols = (int)sqrtf((float)m_particleCount);
-        float startX = -(cols * m_config.spawnSpacing) * 0.5f;
-        float startY = (m_particleCount / cols * m_config.spawnSpacing) * 0.5f;
+        int cols  = (int)cbrtf((float)m_particleCount);
+        int rows  = cols;
+        int depth = (m_particleCount + cols * rows - 1) / (cols * rows);
+
+        float startX = -(cols  * m_config.spawnSpacing) * 0.5f;
+        float startY =  (rows  * m_config.spawnSpacing) * 0.5f;
+        float startZ = -(depth * m_config.spawnSpacing) * 0.5f;
 
         for (int idx = 0; idx < m_particleCount; idx++)
         {
             int x = idx % cols;
-            int y = idx / cols;
+            int y = (idx / cols) % rows;
+            int z = idx / (cols * rows);
 
-            h[idx].position = make_float2(startX + x * m_config.spawnSpacing, startY - y * m_config.spawnSpacing);
+            h[idx].position = make_float3(
+                startX + x * m_config.spawnSpacing,
+                startY - y * m_config.spawnSpacing,
+                startZ + z * m_config.spawnSpacing
+            );
             h[idx].predictedPosition = h[idx].position;
-            h[idx].velocity = make_float2(0.0f, 0.0f);
-            h[idx].acceleration = make_float2(0.0f, 0.0f);
-            h[idx].density = m_config.targetDensity;
-            h[idx].nearDensity = 0.0f;
-            h[idx].pressure = 0.0f;
+            h[idx].velocity     = make_float3(0.0f, 0.0f, 0.0f);
+            h[idx].acceleration = make_float3(0.0f, 0.0f, 0.0f);
+            h[idx].density      = m_config.targetDensity;
+            h[idx].nearDensity  = 0.0f;
+            h[idx].pressure     = 0.0f;
             h[idx].nearPressure = 0.0f;
-            h[idx].mass = 1.0f;
+            h[idx].mass         = 1.0f;
         }
 
         cudaMemcpy(m_data->d_particles, h.data(), m_maxParticles * sizeof(Particle), cudaMemcpyHostToDevice);

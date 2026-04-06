@@ -1,8 +1,8 @@
 #pragma once
 #include "../SPH.h"
-#include "Spawner2D.h"
+#include "Spawner3D.h"
 
-namespace sph::dim2
+namespace sph::dim3
 {
     class Simulation : public ISimulation
     {
@@ -19,8 +19,6 @@ namespace sph::dim2
         const Config& GetConfig() const override { return m_config; }
 
         void RegisterGLBuffer(GLuint buffer) override;
-
-        void SpawnParticles(int count, float wx, float wy);
 
     private:
         void InitSpawnParticles();

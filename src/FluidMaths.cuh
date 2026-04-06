@@ -8,6 +8,15 @@ __constant__ float d_SpikyPow2ScalingFactor;
 __constant__ float d_SpikyPow3DerivativeScalingFactor;
 __constant__ float d_SpikyPow2DerivativeScalingFactor;
 
+__device__ inline float LinearKernel(float dst, float radius)
+{
+	if (dst < radius)
+    {
+        return 1.0f - dst / radius;
+    }
+    return 0.0f;
+}
+
 __device__ inline float SmoothingKernelPoly6(float dst, float radius)
 {
     if (dst < radius)

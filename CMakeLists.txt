@@ -17,16 +17,32 @@ add_subdirectory(extern)
 add_executable(cuda_sph
     src/main.cpp
     src/SPH.cu
+    src/SPHDemo.cpp
+    src/SPHDemo2D.cpp
+    src/SPHDemo3D.cpp
 
     src/SPH.h
     src/Constants.h
     src/FluidMaths.cuh
+    src/SPHDemo.h
+    src/SPHDemo2D.h
+    src/SPHDemo3D.h
 
     src/2D/SPH2D.h
     src/2D/SPH2D.cu
     src/2D/SPHCompute2D.cuh
     src/2D/SPHCompute2D.cu
     src/2D/SpatialHash2D.cuh
+    src/2D/Spawner2D.h
+    src/2D/Spawner2D.cpp
+
+    src/3D/SPH3D.h
+    src/3D/SPH3D.cu
+    src/3D/SPHCompute3D.cuh
+    src/3D/SPHCompute3D.cu
+    src/3D/SpatialHash3D.cuh
+    src/3D/Spawner3D.h
+    src/3D/Spawner3D.cpp
 )
 
 # CUDA-specific compile options
